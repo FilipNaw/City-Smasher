@@ -1,158 +1,131 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using TMPro;
-using Unity.VisualScripting;
-using UnityEngine;
+﻿using UnityEngine;
 
-public class PlayerController : MonoBehaviour
+public class CarController : MonoBehaviour
 {
-    public float rotationSpeed = 100f;
-    public float flySpeed = 5f;
-    //odniesienie do menadzera poziomu
-    GameObject levelManagerObject;
-    //stan os�on w procentach (1=100%)
-    float shieldCapacity = 1;
-    //p�omie� silnika
-    GameObject engineFlame;
-    //odg�os silnika
-    GameObject engineSound;
-    //wizualna os�ona
-    GameObject shieldSphere;
+    // Odwołania do Wheel Colliderów
+    public WheelCollider FrontLeftWheel;
+    public WheelCollider FrontRightWheel;
+    public WheelCollider RearLeftWheel;
+    public WheelCollider RearRightWheel;
 
-    // Start is called before the first frame update
+    // Odwołania do wizualnych modeli kół
+    public Transform FrontLeftTransform;
+    public Transform FrontRightTransform;
+    public Transform RearLeftTransform;
+    public Transform RearRightTransform;
+
+    // Parametry sterowania
+    public float motorForce = 8000f;          // Siła napędowa
+    public float brakeForce = 1500f;         // Siła hamowania
+    public float maxSteerAngle = 30f;        // Maksymalny kąt skrętu
+    public float antiRollForce = 3000f;      // Siła stabilizatora
+    public float mass = 10f;
+
+    private Rigidbody rb;
+    private float horizontalInput;
+    private float verticalInput;
+    private bool isBraking;
+    private float steerAngle;
+
     void Start()
     {
-        levelManagerObject = GameObject.Find("LevelManager");
-        engineFlame = transform.Find("EngineFlame").gameObject;
-        engineSound = transform.Find("EngineSound").gameObject;
-        shieldSphere = transform.Find("ShieldSphere").gameObject;
+        // Pobranie komponentu Rigidbody i obniżenie środka ciężkości
+        rb = GetComponent<Rigidbody>();
+        rb.centerOfMass = new Vector3(0, -0.7f, 0); // Niżej dla lepszej stabilności
     }
 
-    // Update is called once per frame
     void Update()
     {
-        //dodaj do wsp�rz�dnych warto�� x=1, y=0, z=0 pomno�one przez czas
-        //mierzony w sekundach od ostatniej klatki
-        //transform.position += new Vector3(1, 0, 0) * Time.deltaTime;
-
-        //prezentacja dzia�ania wyg�adzonego sterowania (emualcja joystika)
-        //Debug.Log(Input.GetAxis("Vertical"));
-
-        //sterowanie pr�dko�ci�
-        //stworz nowy wektor przesuni�cia o warto�ci 1 do przodu
-        Vector3 movement = transform.forward;
-        //pomn� go przez czas od ostatniej klatki
-        movement *= Time.deltaTime;
-        //pomn� go przez "wychylenie joystika"
-        movement *= Input.GetAxis("Vertical");
-        //pomn� przez pr�dko�� lotu
-        movement *= flySpeed;
-        //dodaj ruch do obiektu
-        //zmiana na fizyke
-        // --- transform.position += movement;
-
-        //komponent fizyki wewn�trz gracza
-        Rigidbody rb = GetComponent<Rigidbody>();
-        //dodaj si�e - do przodu statku w trybie zmiany pr�dko�ci
-        rb.AddForce(movement * 10, ForceMode.VelocityChange);
-
-
-        //obr�t
-        //modyfikuj o� "Y" obiektu player
-        Vector3 rotation = Vector3.up;
-        //przemn� przez czas
-        rotation *= Time.deltaTime;
-        //przemn� przez klawiatur�
-        rotation *= Input.GetAxis("Horizontal");
-        //pomn� przez pr�dko�� obrotu
-        rotation *= rotationSpeed;
-        //dodaj obr�t do obiektu
-        //nie mo�emy u�y� += poniewa� unity u�ywa Quaternion�w do zapisu rotacji
-        transform.Rotate(rotation);
-
-        //dostosuj wielko�� p�omienia silnika do ilo�ci dodanego "gazu", tylko dla dodatnich
-        //engineFlame.transform.localScale = Vector3.one * Mathf.Max(Input.GetAxis("Vertical"), 0);
-
-        //dostosuj g�o�no�� od�osu silnika j.w.
-        //engineSound.GetComponent<AudioSource>().volume = Mathf.Max(Input.GetAxis("Vertical"), 0);
-
-        //pasywna regeneracja os�on
-        if (shieldCapacity < 1)
-            shieldCapacity += Time.deltaTime / 100;
-
-        //zaktualizuj interfejs
-        UpdateUI();
+        GetInput();        // Pobranie danych wejściowych od gracza
+        Steer();           // Skręt kół przednich
+        Accelerate();      // Przyspieszenie/hamowanie
+        UpdateWheelPoses(); // Aktualizacja pozycji wizualnych modeli kół
     }
 
-    private void UpdateUI()
+    void FixedUpdate()
     {
-        //metoda wykonuje wszystko zwi�zane z aktualizacj� interfejsu u�ytkownika
+        ApplyAntiRollBar(FrontLeftWheel, FrontRightWheel);  // Stabilizator przód
+        ApplyAntiRollBar(RearLeftWheel, RearRightWheel);    // Stabilizator tył
+    }
 
-        //wyciagnij z menadzera poziomu pozycje wyjscia
-        Vector3 target = levelManagerObject.GetComponent<LevelManager>().exitPosition;
-        //obroc znacznik w strone wyjscia
-        transform.Find("NavUI").Find("TargetMarker").LookAt(target);
-        //zmien ilosc procentwo widoczna w interfejsie
-        //TODO: poprawi� wy�wietlanie stanu os�on!
-        TextMeshProUGUI shieldText =
-            GameObject.Find("Canvas").transform.Find("ShieldCapacityText").GetComponent<TextMeshProUGUI>();
-        shieldText.text = " Shield: " + (shieldCapacity * 100).ToString("F0") + "%";
+    // Funkcja pobierająca dane wejściowe od użytkownika
+    void GetInput()
+    {
+        horizontalInput = Input.GetAxis("Horizontal");
+        verticalInput = Input.GetAxis("Vertical");
+        isBraking = Input.GetKey(KeyCode.Space); // Hamowanie ręczne
+    }
 
-        //sprawdzamy czy poziom si� zako�czy� i czy musimy wy�wietli� ekran ko�cowy
-        if (levelManagerObject.GetComponent<LevelManager>().levelComplete)
+    // Funkcja odpowiadająca za skręt kół przednich
+    void Steer()
+    {
+        steerAngle = maxSteerAngle * horizontalInput;
+        FrontLeftWheel.steerAngle = steerAngle;
+        FrontRightWheel.steerAngle = steerAngle;
+    }
+
+    // Funkcja odpowiadająca za przyspieszanie i hamowanie
+    void Accelerate()
+    {
+        if (!isBraking)
         {
-            //znajdz canvas (interfejs), znajdz w nim ekran konca poziomu i go w��cz
-            GameObject.Find("Canvas").transform.Find("LevelCompleteScreen").gameObject.SetActive(true);
+            FrontLeftWheel.motorTorque = verticalInput * motorForce;
+            FrontRightWheel.motorTorque = verticalInput * motorForce;
+            ApplyBrake(0); // Brak hamowania
         }
-        //sprawdzamy czy poziom si� zako�czy� i czy musimy wy�wietli� ekran ko�cowy
-        if (levelManagerObject.GetComponent<LevelManager>().levelFailed)
+        else
         {
-            //znajdz canvas (interfejs), znajdz w nim ekran konca poziomu i go w��cz
-            GameObject.Find("Canvas").transform.Find("GameOverScreen").gameObject.SetActive(true);
+            ApplyBrake(brakeForce); // Hamowanie
         }
     }
 
-    private void OnCollisionEnter(Collision collision)
+    // Funkcja odpowiadająca za aktualizację pozycji i rotacji modelu wizualnego koła
+    void UpdateWheelPose(WheelCollider collider, Transform wheelTransform)
     {
-        //uruchamia si� automatycznie je�li zetkniemy sie z innym coliderem
-
-        //sprawdz czy dotkn�li�my asteroidy
-        if (collision.collider.transform.CompareTag("Asteroid"))
-        {
-            //transform asteroidy
-            Transform asteroid = collision.collider.transform;
-            //policz wektor wed�ug kt�rego odepchniemy asteroide
-            Vector3 shieldForce = asteroid.position - transform.position;
-            //popchnij asteroide
-            asteroid.GetComponent<Rigidbody>().AddForce(shieldForce * 5, ForceMode.Impulse);
-            shieldCapacity -= 0.25f;
-            //b�y�nij os�onami
-            ShieldFlash();
-            if (shieldCapacity <= 0)
-            {
-                //poinformuj level manager, �e gra si� sko�czy�a bo nie mamy os�on
-                levelManagerObject.GetComponent<LevelManager>().OnFailure();
-            }
-        }
+        Vector3 pos;
+        Quaternion quat;
+        collider.GetWorldPose(out pos, out quat);
+        wheelTransform.position = pos;
+        wheelTransform.rotation = quat;
     }
 
-    private void OnTriggerEnter(Collider other)
+    void UpdateWheelPoses()
     {
-        //je�eli dotkniemy znacnzika ko�ca poziomu to ustaw w levelmanager flag�,
-        //�e poziom jest uko�czony
-        if (other.transform.CompareTag("LevelExit"))
-        {
-            //wywo�aj dla LevelManager metod� zako�czenia poziomu
-            levelManagerObject.GetComponent<LevelManager>().OnSuccess();
-        }
+        UpdateWheelPose(FrontLeftWheel, FrontLeftTransform);
+        UpdateWheelPose(FrontRightWheel, FrontRightTransform);
+        UpdateWheelPose(RearLeftWheel, RearLeftTransform);
+        UpdateWheelPose(RearRightWheel, RearRightTransform);
     }
-    private void ShieldFlash()
+
+    // Funkcja stabilizatora (anti-roll bar) do przeciwdziałania przechylaniu
+    void ApplyAntiRollBar(WheelCollider leftWheel, WheelCollider rightWheel)
     {
-        shieldSphere.SetActive(true);
-        Invoke("ShieldOff", 1);
+        WheelHit hit;
+        float travelL = 1.0f;
+        float travelR = 1.0f;
+
+        bool groundedL = leftWheel.GetGroundHit(out hit);
+        if (groundedL)
+            travelL = (-leftWheel.transform.InverseTransformPoint(hit.point).y - leftWheel.radius) / leftWheel.suspensionDistance;
+
+        bool groundedR = rightWheel.GetGroundHit(out hit);
+        if (groundedR)
+            travelR = (-rightWheel.transform.InverseTransformPoint(hit.point).y - rightWheel.radius) / rightWheel.suspensionDistance;
+
+        float antiRoll = (travelL - travelR) * antiRollForce;
+
+        if (groundedL)
+            rb.AddForceAtPosition(leftWheel.transform.up * -antiRoll, leftWheel.transform.position);
+        if (groundedR)
+            rb.AddForceAtPosition(rightWheel.transform.up * antiRoll, rightWheel.transform.position);
     }
-    void ShieldOff()
+
+    // Funkcja odpowiadająca za hamowanie
+    void ApplyBrake(float brakeForce)
     {
-        shieldSphere.SetActive(false);
+        FrontLeftWheel.brakeTorque = brakeForce;
+        FrontRightWheel.brakeTorque = brakeForce;
+        RearLeftWheel.brakeTorque = brakeForce;
+        RearRightWheel.brakeTorque = brakeForce;
     }
 }

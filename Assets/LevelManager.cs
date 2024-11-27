@@ -1,66 +1,72 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class LevelManager : MonoBehaviour
 {
-    Transform player;
-    //odleg³oœc od koñca poziomu
-    public float levelExitDistance = 100;
-    //punkt koñca poziomu
-    public Vector3 exitPosition;
-    public GameObject exitPrefab;
-    //zmienna - flaga - oznaczaj¹ca ukoñczenie poziomu
-    public bool levelComplete = false;
-    //taka sama zmienna tylko jeœli przegramy
-    public bool levelFailed = false;
-    // Start is called before the first frame update
-    void Start()
-    {
-        //znajdz gracza
-        player = GameObject.FindGameObjectWithTag("Player").transform;
-        //wylosuj pozycjê na kole o œrednicy 100 jednostek
-        Vector2 spawnCircle = Random.insideUnitCircle; //losowa pozycja x,y wewn¹trz ko³a o r=1
-        //chcemy tylko pozycjê na okrêgu, a nie wewn¹trz ko³a
-        spawnCircle = spawnCircle.normalized; //pozycje x,y w odleg³oœci 1 od œrodka
-        spawnCircle *= levelExitDistance; //pozycja x,y w odleg³oœci 100 od œrodka
-        //konwertujemy do Vector3
-        //podstawiamy: x=x, y=0, z=y
-        exitPosition = new Vector3(spawnCircle.x, 0, spawnCircle.y);
-        Instantiate(exitPrefab, exitPosition, Quaternion.identity);
+    // Singleton dla ³atwego dostêpu do LevelManagera
+    public static LevelManager Instance;
 
-        //wystartuj czas
-        Time.timeScale = 1f;
+    private void Awake()
+    {
+        // Zapewniamy, ¿e istnieje tylko jeden LevelManager w grze
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject); // Nie usuwaj obiektu przy prze³adowaniu sceny
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
     }
 
-    // Update is called once per frame
-    void Update()
+    // Funkcja do przejœcia do kolejnego poziomu
+    public void LoadNextLevel()
     {
+        int currentSceneIndex = SceneManager.GetActiveScene().buildIndex;
+        int nextSceneIndex = currentSceneIndex + 1;
 
+        if (nextSceneIndex < SceneManager.sceneCountInBuildSettings)
+        {
+            SceneManager.LoadScene(nextSceneIndex);
+        }
+        else
+        {
+            Debug.Log("Nie ma wiêcej poziomów. Wracamy do menu g³ównego.");
+            LoadMainMenu();
+        }
     }
-    //funkcja jest utuchamiana kiedy dany poziom (level) jest zakoñczony sukcesem
-    public void OnSuccess()
+
+    // Funkcja do prze³adowania obecnego poziomu
+    public void ReloadLevel()
     {
-        //zatrzymaj fizykê gry
-        Time.timeScale = 0f;
-        //ustaw flagê - poziom zakoñczony
-        levelComplete = true;
-        //zatrzymaj ambientowa muzyczke
-        Camera.main.transform.GetComponent<AudioSource>().Stop();
-        //odegraj dŸwiêk koñca poziomu
-        //Camera.main.transform.Find("LevelCompleteSound").GetComponent<AudioSource>().Play();
-        //przenisione do elementu interfejsu
+        int currentSceneIndex = SceneManager.GetActiveScene().buildIndex;
+        SceneManager.LoadScene(currentSceneIndex);
     }
-    public void OnFailure()
+
+    // Funkcja do za³adowania menu g³ównego
+    public void LoadMainMenu()
     {
-        //zatrzymaj fizykê
-        Time.timeScale = 0f;
-        //ustaw flagê, ¿e nie uda³o siê ukoñczyæ poziomu
-        levelFailed = true;
-        //zatrzymaj ambientowa muzyczke
-        Camera.main.transform.GetComponent<AudioSource>().Stop();
-        //odgrywmay dzwiek przegranej
-        //Camera.main.transform.Find("GameOverSound").GetComponent<AudioSource>().Play();
-        //przenisione do elementu interfejsu
+        SceneManager.LoadScene("MainMenu"); // Upewnij siê, ¿e scena o nazwie "MainMenu" istnieje
+    }
+
+    // Funkcja do za³adowania poziomu o okreœlonym indeksie
+    public void LoadLevelByIndex(int levelIndex)
+    {
+        if (levelIndex >= 0 && levelIndex < SceneManager.sceneCountInBuildSettings)
+        {
+            SceneManager.LoadScene(levelIndex);
+        }
+        else
+        {
+            Debug.LogError("Nieprawid³owy indeks poziomu!");
+        }
+    }
+
+    // Funkcja do zakoñczenia gry
+    public void QuitGame()
+    {
+        Debug.Log("Wyjœcie z gry.");
+        Application.Quit();
     }
 }
